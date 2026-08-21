@@ -434,6 +434,87 @@
   }
   .template-area { height: 210px; }
 
+  /* ---------- Approval line ---------- */
+  .approval-panel {
+    margin-top: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 18px;
+  }
+  .approval-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+    margin: 14px 0 4px;
+  }
+  @media (max-width: 860px) {
+    .approval-grid { grid-template-columns: 1fr; }
+  }
+  .approval-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 12.5px;
+    color: var(--text-sub);
+  }
+  .ap-optional {
+    font-weight: 400;
+    color: var(--text-sub);
+    font-size: 11px;
+  }
+  .ap-input {
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 13.5px;
+    font-family: "Noto Sans KR", sans-serif;
+  }
+  .ap-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ap-result { margin-top: 14px; }
+  .ap-tier {
+    font-size: 12.5px;
+    color: var(--text-sub);
+    margin-bottom: 12px;
+  }
+  .ap-group { margin-bottom: 10px; }
+  .ap-group-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ap-group-label .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .ap-approve .dot { background: var(--stamp); }
+  .ap-agree .dot { background: var(--accent); }
+  .ap-ref .dot { background: var(--text-sub); }
+  .ap-names { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ap-chip {
+    font-size: 12.5px;
+    padding: 5px 10px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+  .ap-chip.final {
+    border-color: var(--stamp);
+    color: var(--stamp);
+    font-weight: 700;
+  }
+  .ap-warning {
+    font-size: 13px;
+    color: var(--err);
+    background: var(--surface-2);
+    border-left: 2px solid var(--err);
+    padding: 10px 12px;
+    border-radius: 3px;
+  }
+
   .foot {
     margin-top: 22px;
     text-align: center;
@@ -506,6 +587,32 @@
       <button class="btn btn-ghost" id="templateResetBtn">기본 서식으로 초기화</button>
     </div>
     <p class="status" id="templateStatus"></p>
+  </section>
+
+  <section class="approval-panel">
+    <div class="history-head">
+      <h2>결재선 자동배치</h2>
+    </div>
+    <p class="history-scope">전결규정(② 1천만원 이하 / ③ 1천만원 초과~1억 이하 / ④ 1억 초과~5억 이하, 예가&gt;계약가 기준)에 따라 결재선을 계산합니다. 요청부서 팀장·본부장 이름은 로스터에서 확인 후 입력해주세요.</p>
+
+    <div class="approval-grid">
+      <label>계약금액 (원)
+        <input type="text" id="apAmount" class="ap-input" inputmode="numeric" placeholder="예: 20000000">
+      </label>
+      <label>기안자 (요청부서 담당자) 이름
+        <input type="text" id="apDrafter" class="ap-input" placeholder="예: 홍길동">
+      </label>
+      <label>요청부서 팀장 이름
+        <input type="text" id="apDeptLead" class="ap-input" placeholder="예: 김팀장">
+      </label>
+      <label>요청부서 본부장 이름 <span class="ap-optional">(1억 초과 시 필요)</span>
+        <input type="text" id="apDeptHead" class="ap-input" placeholder="예: 박본부장">
+      </label>
+    </div>
+    <div class="actions">
+      <button class="btn btn-stamp" id="apCalcBtn">결재선 계산</button>
+    </div>
+    <div id="apResult" class="ap-result"></div>
   </section>
 
   <section class="history">
@@ -839,4 +946,99 @@ clearHistoryBtn.addEventListener('click', () => {
 });
 
 renderHistory('');
+
+/* ---------- Approval line assignment (전결규정) ---------- */
+const FIXED_APPROVERS = {
+  teamLead: '장의신 팀장',
+  divHead: '박우진 본부장',
+  buHead: '박영호 사업부장',
+};
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function approvalTier(amount) {
+  if (amount <= 10000000) return 2;
+  if (amount <= 100000000) return 3;
+  if (amount <= 500000000) return 4;
+  return 5;
+}
+
+function renderApGroup(label, cls, names, markFinal) {
+  if (names.length === 0) return '';
+  const chips = names.map((n, i) => {
+    const isFinal = markFinal && i === names.length - 1;
+    return `<span class="ap-chip${isFinal ? ' final' : ''}">${n}${isFinal ? ' · 최종결재' : ''}</span>`;
+  }).join('');
+  return `<div class="ap-group ${cls}"><div class="ap-group-label"><span class="dot"></span>${label}</div><div class="ap-names">${chips}</div></div>`;
+}
+
+document.getElementById('apCalcBtn').addEventListener('click', () => {
+  const resultEl = document.getElementById('apResult');
+  const amountRaw = document.getElementById('apAmount').value.replace(/[^0-9]/g, '');
+  const amount = Number(amountRaw);
+  const drafter = escapeHtml(document.getElementById('apDrafter').value.trim());
+  const deptLead = escapeHtml(document.getElementById('apDeptLead').value.trim());
+  const deptHead = escapeHtml(document.getElementById('apDeptHead').value.trim());
+
+  if (!amountRaw || amount <= 0) {
+    resultEl.innerHTML = '<div class="ap-warning">계약금액을 입력해주세요.</div>';
+    return;
+  }
+
+  const tier = approvalTier(amount);
+
+  if (tier === 5) {
+    resultEl.innerHTML = '<div class="ap-warning">⚠ 5억원을 초과하는 건입니다. 이 표의 범위를 벗어나므로 전결규정을 직접 확인해주세요 (사장님 결재 등 추가 절차가 있을 수 있습니다).</div>';
+    return;
+  }
+  if (!drafter) {
+    resultEl.innerHTML = '<div class="ap-warning">기안자(요청부서 담당자) 이름을 입력해주세요.</div>';
+    return;
+  }
+  if (!deptLead) {
+    resultEl.innerHTML = '<div class="ap-warning">요청부서 팀장 이름을 입력해주세요.</div>';
+    return;
+  }
+  if (tier === 4 && !deptHead) {
+    resultEl.innerHTML = '<div class="ap-warning">1억원 초과 건은 요청부서 본부장 이름도 필요합니다.</div>';
+    return;
+  }
+
+  const approve = [];
+  const agree = [];
+  const ref = [];
+  const tierLabel = {
+    2: '② 1천만원 이하',
+    3: '③ 1천만원 초과 ~ 1억 이하',
+    4: '④ 1억 초과 ~ 5억 이하',
+  }[tier];
+
+  if (tier === 2) {
+    approve.push(FIXED_APPROVERS.teamLead);
+    agree.push(`${drafter} (기안자)`);
+    ref.push(`${deptLead} (요청부서 팀장)`);
+  } else if (tier === 3) {
+    agree.push(FIXED_APPROVERS.teamLead);
+    agree.push(`${drafter} (기안자)`);
+    approve.push(`${deptLead} (요청부서 팀장)`);
+    agree.push(FIXED_APPROVERS.buHead);
+  } else if (tier === 4) {
+    agree.push(FIXED_APPROVERS.teamLead);
+    ref.push(FIXED_APPROVERS.divHead);
+    agree.push(`${drafter} (기안자)`);
+    approve.push(`${deptLead} (요청부서 팀장)`);
+    approve.push(`${deptHead} (요청부서 본부장)`);
+    agree.push(FIXED_APPROVERS.buHead);
+  }
+
+  resultEl.innerHTML =
+    `<div class="ap-tier">적용 구간: ${tierLabel} (예가 &gt; 계약가 기준)</div>` +
+    renderApGroup('결재', 'ap-approve', approve, true) +
+    renderApGroup('합의', 'ap-agree', agree, false) +
+    renderApGroup('참조', 'ap-ref', ref, false);
+});
 </script>
