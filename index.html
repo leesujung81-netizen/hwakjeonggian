@@ -458,6 +458,40 @@
     font-size: 12.5px;
     color: var(--text-sub);
   }
+  .ap-field-wide { grid-column: 1 / -1; }
+  .ap-field-label {
+    display: block;
+    font-size: 12.5px;
+    color: var(--text-sub);
+    margin-bottom: 6px;
+  }
+  .ap-radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ap-radio { position: relative; }
+  .ap-radio input {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+  }
+  .ap-radio span {
+    display: inline-block;
+    padding: 8px 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    font-size: 13px;
+    color: var(--text-sub);
+    background: var(--surface);
+    cursor: pointer;
+  }
+  .ap-radio input:checked + span {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 700;
+  }
+  .ap-radio input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
   .ap-optional {
     font-weight: 400;
     color: var(--text-sub);
@@ -593,12 +627,17 @@
     <div class="history-head">
       <h2>결재선 자동배치</h2>
     </div>
-    <p class="history-scope">전결규정(② 1천만원 이하 / ③ 1천만원 초과~1억 이하 / ④ 1억 초과~5억 이하, 예가&gt;계약가 기준)에 따라 결재선을 계산합니다. 요청부서 팀장·본부장 이름은 로스터에서 확인 후 입력해주세요.</p>
+    <p class="history-scope">전결규정(예가&gt;계약가 기준)에 따라 결재선을 계산합니다. 요청부서 팀장·본부장 이름은 로스터에서 확인 후 입력해주세요.</p>
 
     <div class="approval-grid">
-      <label>계약금액 (원)
-        <input type="text" id="apAmount" class="ap-input" inputmode="numeric" placeholder="예: 20000000">
-      </label>
+      <div class="ap-field-wide">
+        <span class="ap-field-label">계약금액</span>
+        <div class="ap-radio-group">
+          <label class="ap-radio"><input type="radio" name="apTier" value="2" checked><span>1천만원 미만</span></label>
+          <label class="ap-radio"><input type="radio" name="apTier" value="3"><span>1억 미만</span></label>
+          <label class="ap-radio"><input type="radio" name="apTier" value="4"><span>1억 이상</span></label>
+        </div>
+      </div>
       <label>기안자 (요청부서 담당자) 이름
         <input type="text" id="apDrafter" class="ap-input" placeholder="예: 홍길동">
       </label>
@@ -960,13 +999,6 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function approvalTier(amount) {
-  if (amount <= 10000000) return 2;
-  if (amount <= 100000000) return 3;
-  if (amount <= 500000000) return 4;
-  return 5;
-}
-
 function renderApGroup(label, cls, names, markFinal) {
   if (names.length === 0) return '';
   const chips = names.map((n, i) => {
@@ -978,23 +1010,12 @@ function renderApGroup(label, cls, names, markFinal) {
 
 document.getElementById('apCalcBtn').addEventListener('click', () => {
   const resultEl = document.getElementById('apResult');
-  const amountRaw = document.getElementById('apAmount').value.replace(/[^0-9]/g, '');
-  const amount = Number(amountRaw);
+  const tierInput = document.querySelector('input[name="apTier"]:checked');
+  const tier = tierInput ? Number(tierInput.value) : 2;
   const drafter = escapeHtml(document.getElementById('apDrafter').value.trim());
   const deptLead = escapeHtml(document.getElementById('apDeptLead').value.trim());
   const deptHead = escapeHtml(document.getElementById('apDeptHead').value.trim());
 
-  if (!amountRaw || amount <= 0) {
-    resultEl.innerHTML = '<div class="ap-warning">계약금액을 입력해주세요.</div>';
-    return;
-  }
-
-  const tier = approvalTier(amount);
-
-  if (tier === 5) {
-    resultEl.innerHTML = '<div class="ap-warning">⚠ 5억원을 초과하는 건입니다. 이 표의 범위를 벗어나므로 전결규정을 직접 확인해주세요 (사장님 결재 등 추가 절차가 있을 수 있습니다).</div>';
-    return;
-  }
   if (!drafter) {
     resultEl.innerHTML = '<div class="ap-warning">기안자(요청부서 담당자) 이름을 입력해주세요.</div>';
     return;
@@ -1012,9 +1033,9 @@ document.getElementById('apCalcBtn').addEventListener('click', () => {
   const agree = [];
   const ref = [];
   const tierLabel = {
-    2: '② 1천만원 이하',
-    3: '③ 1천만원 초과 ~ 1억 이하',
-    4: '④ 1억 초과 ~ 5억 이하',
+    2: '1천만원 미만',
+    3: '1억 미만',
+    4: '1억 이상',
   }[tier];
 
   if (tier === 2) {
@@ -1035,10 +1056,15 @@ document.getElementById('apCalcBtn').addEventListener('click', () => {
     agree.push(FIXED_APPROVERS.buHead);
   }
 
+  const highNote = tier === 4
+    ? '<div class="ap-tier">※ 5억원을 크게 초과하는 고액 건은 사장님 결재 등 추가 절차가 있을 수 있으니 별도로 확인해주세요.</div>'
+    : '';
+
   resultEl.innerHTML =
     `<div class="ap-tier">적용 구간: ${tierLabel} (예가 &gt; 계약가 기준)</div>` +
     renderApGroup('결재', 'ap-approve', approve, true) +
     renderApGroup('합의', 'ap-agree', agree, false) +
-    renderApGroup('참조', 'ap-ref', ref, false);
+    renderApGroup('참조', 'ap-ref', ref, false) +
+    highNote;
 });
 </script>
